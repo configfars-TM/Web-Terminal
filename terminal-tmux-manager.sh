@@ -13,6 +13,8 @@ if (( EUID == 0 )); then
   exit 1
 fi
 echo "Mobile Terminal + tmux Manager $APP_VERSION"
+RESET_AUTH="${TERMINAL_MANAGER_RESET_AUTH:-0}"
+for arg in "$@"; do [[ "$arg" == "--reset-auth" ]] && RESET_AUTH=1; done
 
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_ROOT="${TERMINAL_MANAGER_HOME:-$DATA_HOME/terminal-tmux-manager}"
@@ -2473,6 +2475,19 @@ if (( 10#$PORT > 65535 )); then fail "TERMINAL_MANAGER_PORT must be from 0 to 65
 cd "$APP_ROOT"
 echo "Starting the terminal manager on loopback. PORT=0 selects a random available port."
 echo "Persistent tmux sessions use the isolated socket: $TMUX_SOCKET"
+STATE_PATH="$APP_ROOT/state"
+if [[ "$RESET_AUTH" == "1" ]]; then
+  rm -f "$STATE_PATH/auth.json" "$STATE_PATH/auth-key" "$STATE_PATH/sessions.json"
+  echo "Saved password + authenticator were removed (--reset-auth)."
+fi
+if [[ -s "$STATE_PATH/auth.json" ]]; then
+  ACCOUNT_STATE=registered
+  echo "Account status: ALREADY REGISTERED on this machine -> the panel will show \"Sign in\"."
+  echo "To start over and register again, run this script with --reset-auth (or TERMINAL_MANAGER_RESET_AUTH=1)."
+else
+  ACCOUNT_STATE=new
+  echo "Account status: NOT REGISTERED yet -> the panel will show \"First-time setup\"."
+fi
 LOG_DIR="$APP_ROOT/logs"
 mkdir -p "$LOG_DIR"
 chmod 700 "$LOG_DIR"
@@ -2520,7 +2535,7 @@ BOUND_PORT="$(tr -d '\r\n' < "$PORT_FILE")"
 
 if [[ "$MODE" == local ]]; then
   echo "Local URL: http://127.0.0.1:$BOUND_PORT"
-  echo "On first visit, set the password and enroll the authenticator in the web panel."
+  if [[ "$ACCOUNT_STATE" == new ]]; then echo "On first visit, set the password and enroll the authenticator in the web panel."; else echo "Sign in with the existing password and authenticator code."; fi
 else
   TUNNEL_LOG="$LOG_DIR/cloudflared.log"
   : > "$TUNNEL_LOG"
@@ -2539,7 +2554,7 @@ else
   done
   [[ -n "$PUBLIC_URL" ]] || { cat "$TUNNEL_LOG" >&2; fail "Timed out waiting for the Cloudflare Tunnel URL."; }
   echo "Cloudflare Tunnel URL: $PUBLIC_URL"
-  echo "Keep this first-run URL private until the password and authenticator are set in the panel."
+  if [[ "$ACCOUNT_STATE" == new ]]; then echo "Keep this first-run URL private until the password and authenticator are set in the panel."; fi
 fi
 tail -n +1 -f "$SERVER_LOG" &
 SERVER_TAIL_PID=$!
